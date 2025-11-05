@@ -61,25 +61,10 @@ protocol GaussianTrainerDelegate: AnyObject {
 }
 
 // MARK: - Optimizer State Transformation Helpers
-// TupleState.values returns (MLXArray, MLXArray) tuple for Adam optimizer (momentum, variance)
-// We can preserve optimizer states through split/prune operations
-
-/// Select optimizer states at given indices
-func selectOptimizerStates(_ state: TupleState, indices: MLXArray) -> TupleState {
-    let (m, v) = state.values
-    let newM = m[indices]
-    let newV = v[indices]
-    return TupleState(newM, newV)
-}
-
-/// Concatenate multiple optimizer states along axis 0
-func concatenateOptimizerStates(_ states: [TupleState]) -> TupleState {
-    let mArrays = states.map { $0.values.0 }
-    let vArrays = states.map { $0.values.1 }
-    let newM = MLX.concatenated(mArrays, axis: 0)
-    let newV = MLX.concatenated(vArrays, axis: 0)
-    return TupleState(newM, newV)
-}
+// TODO: TupleState API from MLXOptimizers doesn't expose internal structure
+// Need to find proper API for state manipulation or request it from MLX team
+// For now, we'll reinitialize states after split/prune (original behavior)
+// This is suboptimal but safe until we have proper API access
 
 class GaussianTrainer {
     var data: TrainData
@@ -160,9 +145,9 @@ class GaussianTrainer {
         denomGradAccumulation = MLXArray.zeros([numPoints])
     }
     
-    func split_and_prune(params: [MLXArray], states: [TupleState], iteration: Int) -> [TupleState] {
+    func split_and_prune(params: [MLXArray], states: [TupleState], iteration: Int) {
         guard iteration >= densifyFromIter && iteration <= densifyUntilIter else {
-            return states
+            return
         }
 
         var _xyz = params[0]
@@ -171,8 +156,6 @@ class GaussianTrainer {
         var _scales = params[3]
         var _rotation = params[4]
         var _opacity = params[5]
-
-        var currentStates = states
 
         let numPoints = _xyz.shape[0]
 
@@ -200,56 +183,35 @@ class GaussianTrainer {
         // Perform splitting
         if MLX.sum(splitMask.asType(.int32)).item(Int.self) > 0 {
             let splitIndices = conditionToIndices(condition: splitMask)
-            let result = splitGaussians(
-                xyz: _xyz, features_dc: _features_dc, features_rest: _features_rest,
-                scales: _scales, rotation: _rotation, opacity: _opacity,
-                states: currentStates,
-                indices: splitIndices
-            )
-            _xyz = result.0
-            _features_dc = result.1
-            _features_rest = result.2
-            _scales = result.3
-            _rotation = result.4
-            _opacity = result.5
-            currentStates = result.6
+            (_xyz, _features_dc, _features_rest, _scales, _rotation, _opacity) =
+                splitGaussians(
+                    xyz: _xyz, features_dc: _features_dc, features_rest: _features_rest,
+                    scales: _scales, rotation: _rotation, opacity: _opacity,
+                    indices: splitIndices
+                )
         }
 
         // Perform cloning
         if MLX.sum(cloneMask.asType(.int32)).item(Int.self) > 0 {
             let cloneIndices = conditionToIndices(condition: cloneMask)
-            let result = cloneGaussians(
-                xyz: _xyz, features_dc: _features_dc, features_rest: _features_rest,
-                scales: _scales, rotation: _rotation, opacity: _opacity,
-                states: currentStates,
-                indices: cloneIndices
-            )
-            _xyz = result.0
-            _features_dc = result.1
-            _features_rest = result.2
-            _scales = result.3
-            _rotation = result.4
-            _opacity = result.5
-            currentStates = result.6
+            (_xyz, _features_dc, _features_rest, _scales, _rotation, _opacity) =
+                cloneGaussians(
+                    xyz: _xyz, features_dc: _features_dc, features_rest: _features_rest,
+                    scales: _scales, rotation: _rotation, opacity: _opacity,
+                    indices: cloneIndices
+                )
         }
 
         // Perform pruning
         if MLX.sum(pruneMask.asType(.int32)).item(Int.self) > 0 {
             let keepMask: MLXArray = .!pruneMask
             let keepIndices = conditionToIndices(condition: keepMask)
-            let result = pruneGaussians(
-                xyz: _xyz, features_dc: _features_dc, features_rest: _features_rest,
-                scales: _scales, rotation: _rotation, opacity: _opacity,
-                states: currentStates,
-                indices: keepIndices
-            )
-            _xyz = result.0
-            _features_dc = result.1
-            _features_rest = result.2
-            _scales = result.3
-            _rotation = result.4
-            _opacity = result.5
-            currentStates = result.6
+            (_xyz, _features_dc, _features_rest, _scales, _rotation, _opacity) =
+                pruneGaussians(
+                    xyz: _xyz, features_dc: _features_dc, features_rest: _features_rest,
+                    scales: _scales, rotation: _rotation, opacity: _opacity,
+                    indices: keepIndices
+                )
         }
 
         // Update model parameters
@@ -262,16 +224,13 @@ class GaussianTrainer {
 
         // Reset gradient accumulation
         resetGradientAccumulation()
-
-        return currentStates
     }
     
     func splitGaussians(
         xyz: MLXArray, features_dc: MLXArray, features_rest: MLXArray,
         scales: MLXArray, rotation: MLXArray, opacity: MLXArray,
-        states: [TupleState],
         indices: MLXArray
-    ) -> (MLXArray, MLXArray, MLXArray, MLXArray, MLXArray, MLXArray, [TupleState]) {
+    ) -> (MLXArray, MLXArray, MLXArray, MLXArray, MLXArray, MLXArray) {
 
         let selectedXYZ = xyz[indices]
         let selectedFeaturesDC = features_dc[indices]
@@ -327,31 +286,14 @@ class GaussianTrainer {
         let newRotationAll = MLX.concatenated([keptRotation, selectedRotation, selectedRotation], axis: 0)
         let newOpacityAll = MLX.concatenated([keptOpacity, selectedOpacity, selectedOpacity], axis: 0)
 
-        // Preserve optimizer states:
-        // - Keep states for non-split Gaussians
-        // - For split Gaussians, create two new states (inherit parent's momentum/variance scaled down)
-        let newStates = states.map { state in
-            let keptState = selectOptimizerStates(state, indices: keepIndices)
-            let splitState = selectOptimizerStates(state, indices: indices)
-
-            // Scale down the optimizer states for split Gaussians (reduce momentum impact)
-            let (m, v) = splitState.values
-            let scaledM = m * 0.5  // Reduce momentum by half for each child
-            let scaledV = v * 0.5  // Reduce variance by half for each child
-            let scaledState = TupleState(scaledM, scaledV)
-
-            return concatenateOptimizerStates([keptState, scaledState, scaledState])
-        }
-
-        return (newXYZAll, newFeaturesDCAll, newFeaturesRestAll, newScalesAll, newRotationAll, newOpacityAll, newStates)
+        return (newXYZAll, newFeaturesDCAll, newFeaturesRestAll, newScalesAll, newRotationAll, newOpacityAll)
     }
     
     func cloneGaussians(
         xyz: MLXArray, features_dc: MLXArray, features_rest: MLXArray,
         scales: MLXArray, rotation: MLXArray, opacity: MLXArray,
-        states: [TupleState],
         indices: MLXArray
-    ) -> (MLXArray, MLXArray, MLXArray, MLXArray, MLXArray, MLXArray, [TupleState]) {
+    ) -> (MLXArray, MLXArray, MLXArray, MLXArray, MLXArray, MLXArray) {
 
         let selectedXYZ = xyz[indices]
         let selectedFeaturesDC = features_dc[indices]
@@ -372,21 +314,14 @@ class GaussianTrainer {
         let newRotationAll = MLX.concatenated([rotation, selectedRotation], axis: 0)
         let newOpacityAll = MLX.concatenated([opacity, selectedOpacity], axis: 0)
 
-        // Preserve optimizer states: keep all existing states + copy states for cloned Gaussians
-        let newStates = states.map { state in
-            let clonedState = selectOptimizerStates(state, indices: indices)
-            return concatenateOptimizerStates([state, clonedState])
-        }
-
-        return (newXYZAll, newFeaturesDCAll, newFeaturesRestAll, newScalesAll, newRotationAll, newOpacityAll, newStates)
+        return (newXYZAll, newFeaturesDCAll, newFeaturesRestAll, newScalesAll, newRotationAll, newOpacityAll)
     }
 
     func pruneGaussians(
         xyz: MLXArray, features_dc: MLXArray, features_rest: MLXArray,
         scales: MLXArray, rotation: MLXArray, opacity: MLXArray,
-        states: [TupleState],
         indices: MLXArray
-    ) -> (MLXArray, MLXArray, MLXArray, MLXArray, MLXArray, MLXArray, [TupleState]) {
+    ) -> (MLXArray, MLXArray, MLXArray, MLXArray, MLXArray, MLXArray) {
 
         let newXYZ = xyz[indices]
         let newFeaturesDC = features_dc[indices]
@@ -395,12 +330,7 @@ class GaussianTrainer {
         let newRotation = rotation[indices]
         let newOpacity = opacity[indices]
 
-        // Preserve optimizer states: keep only states for kept Gaussians
-        let newStates = states.map { state in
-            selectOptimizerStates(state, indices: indices)
-        }
-
-        return (newXYZ, newFeaturesDC, newFeaturesRest, newScales, newRotation, newOpacity, newStates)
+        return (newXYZ, newFeaturesDC, newFeaturesRest, newScales, newRotation, newOpacity)
     }
     func save_snapshot(iteration: Int, params: [MLXArray]) {
         //TODO
@@ -552,10 +482,14 @@ class GaussianTrainer {
                 MLX.GPU.clearCache()
             }
             if iteration % self.split_and_prune_per_iteration == 0 {
-                // Preserve optimizer states through split/prune operations
-                states = self.split_and_prune(params: params, states: states, iteration: iteration)
+                self.split_and_prune(params: params, states: states, iteration: iteration)
                 // Update params after split_and_prune
                 params = model.getParams()
+                // Reinitialize optimizer states for new parameters
+                // TODO: Preserve states once TupleState API is available
+                states = params.map {
+                    optimizer.newState(parameter: $0)
+                }
                 MLX.GPU.clearCache()
             }
         }
