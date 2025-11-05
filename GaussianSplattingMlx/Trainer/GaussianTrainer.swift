@@ -290,17 +290,25 @@ class GaussianTrainer {
         let newXYZ2 = selectedXYZ - noise
 
         // Create mask to keep Gaussians that are NOT being split
+        // Vectorized approach: use array broadcasting instead of item() loop
         let totalPoints = xyz.shape[0]
-        var keepMask = MLXArray.ones([totalPoints], dtype: .bool)
 
-        // Set split indices to false in keep mask
-        for i in 0..<indices.shape[0] {
-            let idx = indices[i].item(Int.self)
-            if idx < totalPoints {
-                keepMask[idx] = MLXArray(false)
-            }
-        }
+        // Create all possible indices [0, 1, 2, ..., N-1]
+        let allIndices = MLXArray(0..<totalPoints)
 
+        // Expand dimensions for broadcasting: allIndices[N, 1], indices[1, M]
+        let allExpanded = allIndices.expandedDimensions(axes: [1])  // [N, 1]
+        let splitExpanded = indices.expandedDimensions(axes: [0])   // [1, M]
+
+        // Compare: is each index in allIndices present in split indices?
+        // Result shape: [N, M] where result[i, j] = (allIndices[i] == indices[j])
+        let matches = allExpanded .== splitExpanded
+
+        // Any match means this index is being split: reduce along axis 1
+        let isSplit = MLX.any(matches, axes: [1])  // [N]
+
+        // Invert to get keep mask (keep = NOT split)
+        let keepMask = .!isSplit
         let keepIndices = conditionToIndices(condition: keepMask)
 
         // Keep non-split Gaussians and add the two new ones for each split
