@@ -64,18 +64,18 @@ protocol GaussianTrainerDelegate: AnyObject {
 
 /// Transforms an optimizer state array by selecting specific indices
 func selectOptimizerStates(_ state: TupleState, indices: MLXArray) -> TupleState {
-    // TupleState contains (m: MLXArray, v: MLXArray) for Adam optimizer
+    // TupleState is (m: MLXArray, v: MLXArray) for Adam optimizer
     // where m is first moment (momentum) and v is second moment (variance)
-    let newM = state.m[indices]
-    let newV = state.v[indices]
-    return TupleState(m: newM, v: newV)
+    let newM = state.0[indices]
+    let newV = state.1[indices]
+    return (newM, newV)
 }
 
 /// Concatenates multiple optimizer states
 func concatenateOptimizerStates(_ states: [TupleState]) -> TupleState {
-    let allM = MLX.concatenated(states.map { $0.m }, axis: 0)
-    let allV = MLX.concatenated(states.map { $0.v }, axis: 0)
-    return TupleState(m: allM, v: allV)
+    let allM = MLX.concatenated(states.map { $0.0 }, axis: 0)
+    let allV = MLX.concatenated(states.map { $0.1 }, axis: 0)
+    return (allM, allV)
 }
 
 class GaussianTrainer {
