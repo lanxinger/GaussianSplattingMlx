@@ -103,18 +103,58 @@ func build_covariance_2d(
         * t[.ellipsis, 2]
     let tz = t[.ellipsis, 2]
 
-    let J = MLX.zeros([mean3d.shape[0], 3, 3])
-    J[.ellipsis, 0, 0] = 1 / tz * focal_x
-    J[.ellipsis, 0, 2] = -tx / (tz * tz) * focal_x
-    J[.ellipsis, 1, 1] = 1 / tz * focal_y
-    J[.ellipsis, 1, 2] = -ty / (tz * tz) * focal_y
+    // Optimize: Exploit sparse Jacobian structure to eliminate 2 of 4 matmuls
+    // Original: J.matmul(W).matmul(cov3d).matmul(W.T).matmul(J.T) - 4 matmuls + sparse matrix allocation
+    // New: Compute M = W @ cov3d @ W.T, then manually compute J @ M @ J.T using sparsity
+    //
+    // Jacobian J has only 4 non-zero entries:
+    //   J = [j00,   0, j02]
+    //       [  0, j11, j12]
+    //       [  0,   0,   0]
+    //
+    // This reduces computation from 4 matmuls to 2 matmuls + element-wise operations
+
     let W = viewMatrix[.stride(to: 3), .stride(to: 3)].T
-    let cov2d = J.matmul(W).matmul(cov3d).matmul(W.T).matmul(
-        J.transposed(0, 2, 1)
-    )
+
+    // Step 1: Compute M = W @ cov3d @ W.T (necessary transformation to view space)
+    let M = W.matmul(cov3d).matmul(W.T)  // 2 matmuls (unavoidable)
+
+    // Step 2: Precompute sparse Jacobian coefficients
+    let tzInv = 1.0 / tz
+    let tzSq = tz * tz
+    let j00 = tzInv * focal_x
+    let j02 = -tx / tzSq * focal_x
+    let j11 = tzInv * focal_y
+    let j12 = -ty / tzSq * focal_y
+
+    // Step 3: Compute A = J @ M (exploit sparsity - only 2 rows non-zero)
+    // A[0, :] = j00 * M[0, :] + j02 * M[2, :]
+    // A[1, :] = j11 * M[1, :] + j12 * M[2, :]
+    let a00 = j00 * M[.ellipsis, 0, 0] + j02 * M[.ellipsis, 2, 0]
+    let a01 = j00 * M[.ellipsis, 0, 1] + j02 * M[.ellipsis, 2, 1]
+    let a02 = j00 * M[.ellipsis, 0, 2] + j02 * M[.ellipsis, 2, 2]
+
+    let a10 = j11 * M[.ellipsis, 1, 0] + j12 * M[.ellipsis, 2, 0]
+    let a11 = j11 * M[.ellipsis, 1, 1] + j12 * M[.ellipsis, 2, 1]
+    let a12 = j11 * M[.ellipsis, 1, 2] + j12 * M[.ellipsis, 2, 2]
+
+    // Step 4: Compute cov2d = A @ J.T (only 2x2 upper-left block needed)
+    // J.T = [j00,   0,   0]
+    //       [  0, j11,   0]
+    //       [j02, j12,   0]
+    let cov2d_00 = a00 * j00 + a02 * j02
+    let cov2d_01 = a01 * j11 + a02 * j12
+    let cov2d_10 = a10 * j00 + a12 * j02
+    let cov2d_11 = a11 * j11 + a12 * j12
+
+    // Stack into [N, 2, 2] tensor
+    let cov2d = MLX.stack([
+        MLX.stack([cov2d_00, cov2d_01], axis: -1),
+        MLX.stack([cov2d_10, cov2d_11], axis: -1)
+    ], axis: -2)
+
     let filter = MLX.eye(2, m: 2) * 0.3
-    return cov2d[.ellipsis, .stride(to: 2), .stride(to: 2)]
-        + filter[.newAxis]
+    return cov2d + filter[.newAxis]
 }
 
 func projection_ndc(
