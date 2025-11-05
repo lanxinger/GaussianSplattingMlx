@@ -147,11 +147,14 @@ func build_covariance_2d(
     let cov2d_10 = a10 * j00 + a12 * j02
     let cov2d_11 = a11 * j11 + a12 * j12
 
-    // Stack into [N, 2, 2] tensor
-    let cov2d = MLX.stack([
-        MLX.stack([cov2d_00, cov2d_01], axis: -1),
-        MLX.stack([cov2d_10, cov2d_11], axis: -1)
-    ], axis: -2)
+    // Construct [N, 2, 2] tensor from computed elements
+    // Create zeros template and fill with computed values
+    let N = mean3d.shape[0]
+    let cov2d = MLX.zeros([N, 2, 2])
+    cov2d[.ellipsis, 0, 0] = cov2d_00
+    cov2d[.ellipsis, 0, 1] = cov2d_01
+    cov2d[.ellipsis, 1, 0] = cov2d_10
+    cov2d[.ellipsis, 1, 1] = cov2d_11
 
     let filter = MLX.eye(2, m: 2) * 0.3
     return cov2d + filter[.newAxis]
