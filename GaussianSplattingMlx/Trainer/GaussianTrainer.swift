@@ -405,7 +405,7 @@ class GaussianTrainer {
                         trainDepth!.reshaped([-1])[trainMask]
                     ) : MLXArray(0.0 as Float)
                 let ssim_loss =
-                    1.0 - ssim(img1: render[.newAxis], img2: trainRGB[.newAxis])
+                    1.0 - ssim(img1: render[.newAxis], img2: trainRGB[.newAxis], cachedWindow: gaussRender.cachedSsimWindow)
 
                 let total_loss =
                     (1.0 - lambda_dssim) * l1_loss + lambda_dssim * ssim_loss
@@ -453,12 +453,12 @@ class GaussianTrainer {
                     parameter: params[i],
                     state: states[i]
                 )
-                eval(newParam)
                 params[i] = newParam
                 states[i] = newState
                 Logger.shared.debug("update \(i)th param end")
             }
-            eval(optimizer)
+            // Batch eval all updated parameters at once instead of per-parameter
+            eval(params)
             if MLX.GPU.snapshot().cacheMemory > cacheLimit {
                 MLX.GPU.clearCache()
             }

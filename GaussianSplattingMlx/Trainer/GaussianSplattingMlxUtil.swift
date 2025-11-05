@@ -210,11 +210,12 @@ func matrixInverse2d(_ m: MLXArray) -> MLXArray {
     let c = m[.ellipsis, 1, 0]
     let d = m[.ellipsis, 1, 1]
     let det = a * d - b * c
+    let invDet = 1.0 / det  // Single division - multiplications are cheaper
     let inv = MLXArray.zeros(m.shape)
-    inv[.ellipsis, 0, 0] = d / det
-    inv[.ellipsis, 0, 1] = -b / det
-    inv[.ellipsis, 1, 0] = -c / det
-    inv[.ellipsis, 1, 1] = a / det
+    inv[.ellipsis, 0, 0] = d * invDet
+    inv[.ellipsis, 0, 1] = -b * invDet
+    inv[.ellipsis, 1, 0] = -c * invDet
+    inv[.ellipsis, 1, 1] = a * invDet
     return inv
 }
 func conditionToIndices(condition: MLXArray) -> MLXArray {

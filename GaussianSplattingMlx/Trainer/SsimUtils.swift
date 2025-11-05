@@ -18,10 +18,11 @@ func ssim(
     img1: MLXArray,
     img2: MLXArray,
     windowSize: Int = 11,
-    sizeAverage: Bool = true
+    sizeAverage: Bool = true,
+    cachedWindow: MLXArray? = nil  // Use cached window for performance
 ) -> MLXArray {
     let channel: Int = img1.shape.last!
-    let window = createWindow(windowSize: windowSize, channel: channel)  // [C, 1, K, K]
+    let window = cachedWindow ?? createWindow(windowSize: windowSize, channel: channel)  // [C, 1, K, K]
     let conv2d = { (input: MLXArray) -> MLXArray in
         return MLX.conv2d(input, window, padding: IntOrPair(windowSize / 2), groups: channel)
     }

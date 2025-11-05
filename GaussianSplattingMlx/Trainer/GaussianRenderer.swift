@@ -99,6 +99,7 @@ class GaussianRenderer {
     let pix_coord: MLXArray
     let whiteBackground: Bool
     let TILE_SIZE: TILE_SIZE_H_W
+    let cachedSsimWindow: MLXArray  // Cached SSIM window for performance
 
     init(
         active_sh_degree: Int,
@@ -114,6 +115,8 @@ class GaussianRenderer {
         self.W = W
         self.H = H
         self.pix_coord = createMeshGrid(shape: [H, W])
+        // Cache SSIM window once during initialization (11x11, 3 channels for RGB)
+        self.cachedSsimWindow = createWindow(windowSize: 11, channel: 3)
     }
 
     func renderTile(

@@ -54,39 +54,57 @@ func evalSh(deg: Int, sh: MLXArray, dirs: MLXArray) -> MLXArray {
                 * x * sh[.ellipsis, 3])
 
         if deg > 1 {
+            // Precompute all squared and product terms
             let xx = x * x
             let yy = y * y
             let zz = z * z
             let xy = x * y
             let yz = y * z
             let xz = x * z
+
+            // Precompute common intermediate terms
+            let xx_yy = xx - yy  // Used in deg 1, 2, 3
+            let zz2 = 2.0 * zz   // Used multiple times
+            let zz2_xx_yy = zz2 - xx - yy  // Used in deg 1
+
             result =
                 (result + C2[0] * xy * sh[.ellipsis, 4] + C2[1] * yz
-                    * sh[.ellipsis, 5] + C2[2] * (2.0 * zz - xx - yy)
+                    * sh[.ellipsis, 5] + C2[2] * zz2_xx_yy
                     * sh[.ellipsis, 6] + C2[3] * xz * sh[.ellipsis, 7] + C2[4]
-                    * (xx - yy) * sh[.ellipsis, 8])
+                    * xx_yy * sh[.ellipsis, 8])
             if deg > 2 {
+                // Precompute more intermediate terms for deg 2
+                let xx3 = 3 * xx
+                let yy3 = 3 * yy
+                let zz4_xx_yy = 4 * zz - xx - yy  // Shared term used twice
+                let xx3_yy = xx3 - yy
+                let xx_yy3 = xx - yy3
+
                 result =
-                    (result + C3[0] * y * (3 * xx - yy) * sh[.ellipsis, 9] + C3[
-                        1
-                    ] * xy * z * sh[.ellipsis, 10] + C3[2] * y
-                        * (4 * zz - xx - yy) * sh[.ellipsis, 11] + C3[3] * z
-                        * (2 * zz - 3 * xx - 3 * yy) * sh[.ellipsis, 12] + C3[4]
-                        * x * (4 * zz - xx - yy) * sh[.ellipsis, 13] + C3[5] * z
-                        * (xx - yy) * sh[.ellipsis, 14] + C3[6] * x
-                        * (xx - 3 * yy) * sh[.ellipsis, 15])
+                    (result + C3[0] * y * xx3_yy * sh[.ellipsis, 9] + C3[1]
+                        * xy * z * sh[.ellipsis, 10] + C3[2] * y
+                        * zz4_xx_yy * sh[.ellipsis, 11] + C3[3] * z
+                        * (zz2 - xx3 - yy3) * sh[.ellipsis, 12] + C3[4]
+                        * x * zz4_xx_yy * sh[.ellipsis, 13] + C3[5] * z
+                        * xx_yy * sh[.ellipsis, 14] + C3[6] * x
+                        * xx_yy3 * sh[.ellipsis, 15])
                 if deg > 3 {
+                    // Precompute intermediate terms for deg 3
+                    let zz7 = 7 * zz
+                    let zz7_1 = zz7 - 1
+                    let zz7_3 = zz7 - 3
+
                     result =
-                        (result + C4[0] * xy * (xx - yy) * sh[.ellipsis, 16]
-                            + C4[1] * yz * (3 * xx - yy) * sh[.ellipsis, 17]
-                            + C4[2] * xy * (7 * zz - 1) * sh[.ellipsis, 18]
-                            + C4[3] * yz * (7 * zz - 3) * sh[.ellipsis, 19]
+                        (result + C4[0] * xy * xx_yy * sh[.ellipsis, 16]
+                            + C4[1] * yz * xx3_yy * sh[.ellipsis, 17]
+                            + C4[2] * xy * zz7_1 * sh[.ellipsis, 18]
+                            + C4[3] * yz * zz7_3 * sh[.ellipsis, 19]
                             + C4[4] * (zz * (35 * zz - 30) + 3)
-                            * sh[.ellipsis, 20] + C4[5] * xz * (7 * zz - 3)
-                            * sh[.ellipsis, 21] + C4[6] * (xx - yy)
-                            * (7 * zz - 1) * sh[.ellipsis, 22] + C4[7] * xz
-                            * (xx - 3 * yy) * sh[.ellipsis, 23] + C4[8]
-                            * (xx * (xx - 3 * yy) - yy * (3 * xx - yy))
+                            * sh[.ellipsis, 20] + C4[5] * xz * zz7_3
+                            * sh[.ellipsis, 21] + C4[6] * xx_yy
+                            * zz7_1 * sh[.ellipsis, 22] + C4[7] * xz
+                            * xx_yy3 * sh[.ellipsis, 23] + C4[8]
+                            * (xx * xx_yy3 - yy * xx3_yy)
                             * sh[.ellipsis, 24])
                 }
             }
