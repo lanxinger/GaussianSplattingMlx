@@ -94,7 +94,8 @@ class GaussianTrainer {
 
     // Multi-view consistent densification (inspired by FastGS 100-second training)
     // Use multi-view consistency for more robust densification decisions
-    var useMultiViewDensification: Bool = true
+    // DISABLED: Too expensive - 4 forward passes every 100 iterations adds significant overhead
+    var useMultiViewDensification: Bool = false  // Was: true
     var multiViewSampleCount: Int = 4  // Number of views to sample for consistency check
 
     // Progressive resolution scheduling (inspired by DashGaussian CVPR 2025)
@@ -107,7 +108,8 @@ class GaussianTrainer {
 
     // Sparse Adam optimizer (inspired by DashGaussian/LichtFeld-Studio)
     // Skip optimizer updates for parameters with near-zero gradients
-    var useSparseAdam: Bool = true
+    // DISABLED: Checking gradients adds overhead that likely exceeds any savings
+    var useSparseAdam: Bool = false  // Was: true
     var sparseGradientThreshold: Float = 1e-8  // Threshold for considering gradient as "zero"
 
     // Tracking gradients for densification
