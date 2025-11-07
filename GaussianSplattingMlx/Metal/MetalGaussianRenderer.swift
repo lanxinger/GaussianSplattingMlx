@@ -75,7 +75,7 @@ class MetalGaussianRenderer {
     private let maxGaussians: Int
     private var tileSize: SIMD2<UInt32>
     
-    init?(maxGaussians: Int = 1000000, tileSize: SIMD2<UInt32> = SIMD2<UInt32>(64, 64)) {
+    init?(maxGaussians: Int = 1000000, tileSize: SIMD2<UInt32> = SIMD2<UInt32>(16, 16)) {
         guard let device = MTLCreateSystemDefaultDevice() else {
             print("Metal not supported")
             return nil
