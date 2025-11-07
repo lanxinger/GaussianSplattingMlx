@@ -99,7 +99,8 @@ class GaussianTrainer {
 
     // Progressive resolution scheduling (inspired by DashGaussian CVPR 2025)
     // Start training at low resolution and gradually increase to full resolution
-    var useProgressiveResolution: Bool = true
+    // TEMPORARILY DISABLED FOR DEBUGGING - Set to false to use full resolution
+    var useProgressiveResolution: Bool = false  // Was: true
     var minResolutionScale: Float = 0.25  // Start at 25% of original resolution
     var maxResolutionScale: Float = 1.0   // End at 100% of original resolution
     var resolutionRampIterations: Int = 3000  // Ramp up resolution over first 3000 iterations
