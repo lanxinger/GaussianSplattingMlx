@@ -112,9 +112,6 @@ class GaussianTrainer {
     // Tracking gradients for densification
     var xyzGradAccumulation: MLXArray = MLXArray.zeros([0, 3])
     var denomGradAccumulation: MLXArray = MLXArray.zeros([0])
-
-    // Current resolution scale (for progressive resolution in multi-view densification)
-    var currentResolutionScale: Float = 1.0
     init(
         model: GaussModel,
         data: TrainData,
@@ -298,14 +295,17 @@ class GaussianTrainer {
 
     // Multi-view consistent densification score computation (FastGS approach)
     // Samples multiple views and computes per-Gaussian scores based on gradient consistency
-    func computeMultiViewScores() -> MLXArray {
+    func computeMultiViewScores(iteration: Int) -> MLXArray {
         let numPoints = model._xyz.shape[0]
         var gradientSamples: [MLXArray] = []
+
+        // Compute resolution scale for this iteration
+        let resolutionScale = getCurrentResolutionScale(iteration: iteration)
 
         // Sample multiple views and compute gradients for each
         // Use current resolution scale for consistency with main training loop
         for _ in 0..<multiViewSampleCount {
-            let (trainCamera, trainRGB, trainMask, trainDepth) = fetchTrainDataWithResolution(scale: currentResolutionScale)
+            let (trainCamera, trainRGB, trainMask, trainDepth) = fetchTrainDataWithResolution(scale: resolutionScale)
 
             // Compute loss and gradients for this view
             let params = model.getParams()
@@ -386,7 +386,7 @@ class GaussianTrainer {
         if useMultiViewDensification {
             // FastGS approach: Multi-view consistent densification
             Logger.shared.debug("Computing multi-view scores for densification")
-            densificationScore = computeMultiViewScores()
+            densificationScore = computeMultiViewScores(iteration: iteration)
             Logger.shared.debug("Multi-view scores computed")
         } else {
             // Original approach: Gradient-based densification
@@ -617,7 +617,6 @@ class GaussianTrainer {
 
             // Progressive resolution scheduling: start at low resolution, ramp up to full
             let resolutionScale = getCurrentResolutionScale(iteration: iteration)
-            currentResolutionScale = resolutionScale  // Store for multi-view densification
             let (trainCamera, trainRGB, trainMask, trainDepth) =
                 fetchTrainDataWithResolution(scale: resolutionScale)
             let train: ([MLXArray]) -> [MLXArray] = { params in
