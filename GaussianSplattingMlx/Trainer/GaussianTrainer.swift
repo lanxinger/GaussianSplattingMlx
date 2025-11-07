@@ -104,6 +104,11 @@ class GaussianTrainer {
     var maxResolutionScale: Float = 1.0   // End at 100% of original resolution
     var resolutionRampIterations: Int = 3000  // Ramp up resolution over first 3000 iterations
 
+    // Sparse Adam optimizer (inspired by DashGaussian/LichtFeld-Studio)
+    // Skip optimizer updates for parameters with near-zero gradients
+    var useSparseAdam: Bool = true
+    var sparseGradientThreshold: Float = 1e-8  // Threshold for considering gradient as "zero"
+
     // Tracking gradients for densification
     var xyzGradAccumulation: MLXArray = MLXArray.zeros([0, 3])
     var denomGradAccumulation: MLXArray = MLXArray.zeros([0])
@@ -674,6 +679,21 @@ class GaussianTrainer {
 
                 Logger.shared.debug("update \(i)th param start")
                 optimizer.learningRate = lrs[i]
+
+                // Sparse Adam: Skip update if all gradients are near zero
+                // This reduces computation for parameters not being optimized this iteration
+                if useSparseAdam {
+                    // Compute maximum absolute gradient value
+                    let maxAbsGrad = MLX.max(MLX.abs(grads[i])).item(Float.self)
+
+                    // Skip update if maximum gradient is negligible
+                    // This means ALL gradients for this parameter are near zero
+                    if maxAbsGrad < sparseGradientThreshold {
+                        Logger.shared.debug("skip param \(i) update (sparse Adam: max |grad| \(maxAbsGrad) < \(sparseGradientThreshold))")
+                        continue
+                    }
+                }
+
                 let (newParam, newState) = optimizer.applySingle(
                     gradient: grads[i],
                     parameter: params[i],
