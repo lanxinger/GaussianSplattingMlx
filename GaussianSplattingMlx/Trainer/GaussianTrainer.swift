@@ -183,22 +183,30 @@ class GaussianTrainer {
         return scale
     }
 
-    // Resize an MLXArray image using bilinear interpolation
+    // Resize an MLXArray image using nearest-neighbor interpolation
     func resizeImage(_ image: MLXArray, targetH: Int, targetW: Int) -> MLXArray {
         let originalH = image.shape[0]
         let originalW = image.shape[1]
-        let channels = image.shape[2]
 
         if originalH == targetH && originalW == targetW {
             return image  // No resize needed
         }
+
+        // Handle both 2D (H, W) and 3D (H, W, C) arrays
+        let has3Channels = image.shape.count == 3
+        let channels = has3Channels ? image.shape[2] : 1
 
         // Create coordinate grids for target resolution
         let scaleH = Float(originalH) / Float(targetH)
         let scaleW = Float(originalW) / Float(targetW)
 
         // Generate target pixel coordinates
-        var resizedImage = MLXArray.zeros([targetH, targetW, channels])
+        var resizedImage: MLXArray
+        if has3Channels {
+            resizedImage = MLXArray.zeros([targetH, targetW, channels])
+        } else {
+            resizedImage = MLXArray.zeros([targetH, targetW])
+        }
 
         // Simple nearest-neighbor resize for efficiency
         // For each target pixel, find the nearest source pixel
