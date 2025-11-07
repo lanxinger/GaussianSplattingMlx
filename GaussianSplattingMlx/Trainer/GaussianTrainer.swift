@@ -97,6 +97,13 @@ class GaussianTrainer {
     var useMultiViewDensification: Bool = true
     var multiViewSampleCount: Int = 4  // Number of views to sample for consistency check
 
+    // Progressive resolution scheduling (inspired by DashGaussian CVPR 2025)
+    // Start training at low resolution and gradually increase to full resolution
+    var useProgressiveResolution: Bool = true
+    var minResolutionScale: Float = 0.25  // Start at 25% of original resolution
+    var maxResolutionScale: Float = 1.0   // End at 100% of original resolution
+    var resolutionRampIterations: Int = 3000  // Ramp up resolution over first 3000 iterations
+
     // Tracking gradients for densification
     var xyzGradAccumulation: MLXArray = MLXArray.zeros([0, 3])
     var denomGradAccumulation: MLXArray = MLXArray.zeros([0])
@@ -152,6 +159,109 @@ class GaussianTrainer {
         let numPoints = model._xyz.shape[0]
         xyzGradAccumulation = MLXArray.zeros([numPoints])
         denomGradAccumulation = MLXArray.zeros([numPoints])
+    }
+
+    // Progressive resolution scheduling functions
+    func getCurrentResolutionScale(iteration: Int) -> Float {
+        if !useProgressiveResolution {
+            return maxResolutionScale  // Always use full resolution
+        }
+
+        if iteration >= resolutionRampIterations {
+            return maxResolutionScale  // Full resolution after ramp period
+        }
+
+        // Smooth linear ramp from minResolutionScale to maxResolutionScale
+        let progress = Float(iteration) / Float(resolutionRampIterations)
+        let scale = minResolutionScale + (maxResolutionScale - minResolutionScale) * progress
+
+        return scale
+    }
+
+    // Resize an MLXArray image using bilinear interpolation
+    func resizeImage(_ image: MLXArray, targetH: Int, targetW: Int) -> MLXArray {
+        let originalH = image.shape[0]
+        let originalW = image.shape[1]
+        let channels = image.shape[2]
+
+        if originalH == targetH && originalW == targetW {
+            return image  // No resize needed
+        }
+
+        // Create coordinate grids for target resolution
+        let scaleH = Float(originalH) / Float(targetH)
+        let scaleW = Float(originalW) / Float(targetW)
+
+        // Generate target pixel coordinates
+        var resizedImage = MLXArray.zeros([targetH, targetW, channels])
+
+        // Simple nearest-neighbor resize for efficiency
+        // For each target pixel, find the nearest source pixel
+        for h in 0..<targetH {
+            for w in 0..<targetW {
+                let srcH = min(Int(Float(h) * scaleH), originalH - 1)
+                let srcW = min(Int(Float(w) * scaleW), originalW - 1)
+                resizedImage[h, w] = image[srcH, srcW]
+            }
+        }
+
+        return resizedImage
+    }
+
+    // Modified fetchTrainData with progressive resolution support
+    func fetchTrainDataWithResolution(scale: Float) -> (
+        camera: Camera, rgb: MLXArray, mask: MLXArray, depth: MLXArray?
+    ) {
+        let numCameras = data.getNumCameras()
+        let ind = Int.random(in: 0..<numCameras)
+
+        // Get original data
+        let originalRGB = data.rgbArray[ind]
+        let originalH = originalRGB.shape[0]
+        let originalW = originalRGB.shape[1]
+
+        // Calculate scaled dimensions
+        let scaledH = max(Int(Float(originalH) * scale), 16)  // Minimum 16 pixels
+        let scaledW = max(Int(Float(originalW) * scale), 16)
+
+        // Resize if needed
+        let rgb: MLXArray
+        let camera: Camera
+
+        if scale < 0.99 {  // Only resize if significantly different
+            // Resize RGB image
+            rgb = resizeImage(originalRGB, targetH: scaledH, targetW: scaledW)
+
+            // Create scaled camera with adjusted intrinsics
+            let originalIntrinsic = data.intrinsicArray[ind]
+            var scaledIntrinsic = originalIntrinsic * Float(scale)
+
+            // Last row/column should remain [0, 0, 1]
+            scaledIntrinsic[2, 0] = originalIntrinsic[2, 0]
+            scaledIntrinsic[2, 1] = originalIntrinsic[2, 1]
+            scaledIntrinsic[2, 2] = originalIntrinsic[2, 2]
+            scaledIntrinsic[0, 2] = scaledIntrinsic[0, 2] / Float(scale)  // Principal point
+            scaledIntrinsic[1, 2] = scaledIntrinsic[1, 2] / Float(scale)
+
+            camera = Camera(
+                width: scaledW,
+                height: scaledH,
+                intrinsic: scaledIntrinsic,
+                c2w: data.c2wArray[ind]
+            )
+        } else {
+            // Use full resolution
+            rgb = originalRGB
+            camera = data.getViewPointCamera(index: ind)
+        }
+
+        // Compute mask at scaled resolution
+        let depth = data.depthArray?[ind]
+        let mask = conditionToIndices(
+            condition: (data.alphaArray[ind] .> 0.5).reshaped([-1])
+        )
+
+        return (camera, rgb, mask, depth)
     }
 
     // Multi-view consistent densification score computation (FastGS approach)
@@ -468,8 +578,11 @@ class GaussianTrainer {
                 break
             }
             Logger.shared.debug("\(iteration)th iteration")
+
+            // Progressive resolution scheduling: start at low resolution, ramp up to full
+            let resolutionScale = getCurrentResolutionScale(iteration: iteration)
             let (trainCamera, trainRGB, trainMask, trainDepth) =
-                fetchTrainData()
+                fetchTrainDataWithResolution(scale: resolutionScale)
             let train: ([MLXArray]) -> [MLXArray] = { params in
                 let _xyz = params[0]
                 let _features_dc = params[1]
