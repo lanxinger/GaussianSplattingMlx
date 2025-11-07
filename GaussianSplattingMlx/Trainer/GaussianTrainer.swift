@@ -232,10 +232,26 @@ class GaussianTrainer {
         // Resize if needed
         let rgb: MLXArray
         let camera: Camera
+        let mask: MLXArray
+        let depth: MLXArray?
 
         if scale < 0.99 {  // Only resize if significantly different
             // Resize RGB image
             rgb = resizeImage(originalRGB, targetH: scaledH, targetW: scaledW)
+
+            // Resize alpha array for mask computation
+            let originalAlpha = data.alphaArray[ind]
+            let resizedAlpha = resizeImage(originalAlpha, targetH: scaledH, targetW: scaledW)
+            mask = conditionToIndices(
+                condition: (resizedAlpha .> 0.5).reshaped([-1])
+            )
+
+            // Resize depth if available
+            if let originalDepth = data.depthArray?[ind] {
+                depth = resizeImage(originalDepth, targetH: scaledH, targetW: scaledW)
+            } else {
+                depth = nil
+            }
 
             // Create scaled camera with adjusted intrinsics
             let originalIntrinsic = data.intrinsicArray[ind]
@@ -258,13 +274,13 @@ class GaussianTrainer {
             // Use full resolution
             rgb = originalRGB
             camera = data.getViewPointCamera(index: ind)
-        }
 
-        // Compute mask at scaled resolution
-        let depth = data.depthArray?[ind]
-        let mask = conditionToIndices(
-            condition: (data.alphaArray[ind] .> 0.5).reshaped([-1])
-        )
+            // Compute mask at full resolution
+            mask = conditionToIndices(
+                condition: (data.alphaArray[ind] .> 0.5).reshaped([-1])
+            )
+            depth = data.depthArray?[ind]
+        }
 
         return (camera, rgb, mask, depth)
     }
