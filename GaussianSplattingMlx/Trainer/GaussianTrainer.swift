@@ -289,13 +289,13 @@ class GaussianTrainer {
                 let _rotation = params[4]
                 let _opacity = params[5]
 
-                let means3d = gaussRender.get_xyz_from(_xyz)
-                let opacity = gaussRender.get_opacity_from(_opacity)
-                let scales = gaussRender.get_scales_from(_scales)
-                let rotations = gaussRender.get_rotation_from(_rotation)
-                let shs = gaussRender.get_features_from(_features_dc, _features_rest)
+                let means3d = self.gaussRender.get_xyz_from(_xyz)
+                let opacity = self.gaussRender.get_opacity_from(_opacity)
+                let scales = self.gaussRender.get_scales_from(_scales)
+                let rotations = self.gaussRender.get_rotation_from(_rotation)
+                let shs = self.gaussRender.get_features_from(_features_dc, _features_rest)
 
-                let (render, _, _, _, _) = gaussRender.forward(
+                let (render, _, _, _, _) = self.gaussRender.forward(
                     camera: trainCamera,
                     means3d: means3d,
                     shs: shs,
@@ -375,7 +375,10 @@ class GaussianTrainer {
         let densifyThreshold: MLXArray
         if useMultiViewDensification {
             // Use 80th percentile as threshold for multi-view scores
-            densifyThreshold = MLX.percentile(densificationScore, q: 80)
+            // MLX doesn't have percentile, so compute manually via sorting
+            let sorted = MLX.sorted(densificationScore)
+            let percentileIdx = Int(Float(sorted.shape[0]) * 0.8)
+            densifyThreshold = sorted[percentileIdx]
         } else {
             densifyThreshold = MLXArray(gradientThreshold)
         }
