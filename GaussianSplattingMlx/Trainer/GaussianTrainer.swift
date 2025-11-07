@@ -153,14 +153,16 @@ class GaussianTrainer {
     func addGradientAccumulation(xyzGrad: MLXArray) {
         let gradNorm = MLX.sum(MLX.square(xyzGrad), axes: [1])
         let numPoints = xyzGrad.shape[0]
-        
+
         if xyzGradAccumulation.shape[0] != numPoints {
             xyzGradAccumulation = MLXArray.zeros([numPoints])
             denomGradAccumulation = MLXArray.zeros([numPoints])
         }
-        
+
+        // CRITICAL: eval() to prevent computation graph buildup
         xyzGradAccumulation = xyzGradAccumulation + gradNorm
-        denomGradAccumulation = denomGradAccumulation + MLXArray.ones([numPoints])
+        denomGradAccumulation = denomGradAccumulation + 1.0
+        eval(xyzGradAccumulation, denomGradAccumulation)
     }
     
     func resetGradientAccumulation() {
@@ -613,7 +615,7 @@ class GaussianTrainer {
             if forceStop {
                 break
             }
-            Logger.shared.debug("\(iteration)th iteration")
+            // Logger.shared.debug("\(iteration)th iteration")
 
             // Progressive resolution scheduling: start at low resolution, ramp up to full
             let resolutionScale = getCurrentResolutionScale(iteration: iteration)
@@ -626,7 +628,7 @@ class GaussianTrainer {
                 let _scales = params[3]
                 let _rotation = params[4]
                 let _opacity = params[5]
-                Logger.shared.debug("Prepare variables")
+                // Logger.shared.debug("Prepare variables")
                 let means3d = gaussRender.get_xyz_from(_xyz)
                 let opacity = gaussRender.get_opacity_from(_opacity)
                 let scales = gaussRender.get_scales_from(_scales)
@@ -635,7 +637,7 @@ class GaussianTrainer {
                     _features_dc,
                     _features_rest
                 )
-                Logger.shared.debug("Prepare forward")
+                // Logger.shared.debug("Prepare forward")
                 let (
                     render,
                     depth,
@@ -650,7 +652,7 @@ class GaussianTrainer {
                     scales: scales,
                     rotations: rotations
                 )
-                Logger.shared.debug("Calculate loss")
+                // Logger.shared.debug("Calculate loss")
                 let l1_loss = l1Loss(render, trainRGB)
                 let depth_loss =
                     trainDepth != nil
@@ -666,7 +668,7 @@ class GaussianTrainer {
                     + lambda_depth * depth_loss
                 return [total_loss, render]
             }
-            Logger.shared.debug("valueAndGrad")
+            // Logger.shared.debug("valueAndGrad")
             let (loss, grads) = MLX.valueAndGrad(
                 train,
                 argumentNumbers: Array(0..<params.count)
@@ -704,11 +706,11 @@ class GaussianTrainer {
                 // This optimization from LichtFeld-Studio saves ~10-15% compute time in early iterations
                 // Higher-degree SH coefficients have minimal impact when geometry is still being refined
                 if i == 2 && iteration < shHigherDegreeStartIter {
-                    Logger.shared.debug("skip _features_rest update (iteration \(iteration) < \(shHigherDegreeStartIter))")
+                    // Logger.shared.debug("skip _features_rest update (iteration \(iteration) < \(shHigherDegreeStartIter))")
                     continue
                 }
 
-                Logger.shared.debug("update \(i)th param start")
+                // Logger.shared.debug("update \(i)th param start")
                 optimizer.learningRate = lrs[i]
 
                 // Sparse Adam: Skip update if all gradients are near zero
@@ -720,7 +722,7 @@ class GaussianTrainer {
                     // Skip update if maximum gradient is negligible
                     // This means ALL gradients for this parameter are near zero
                     if maxAbsGrad < sparseGradientThreshold {
-                        Logger.shared.debug("skip param \(i) update (sparse Adam: max |grad| \(maxAbsGrad) < \(sparseGradientThreshold))")
+                        // Logger.shared.debug("skip param \(i) update (sparse Adam: max |grad| \(maxAbsGrad) < \(sparseGradientThreshold))")
                         continue
                     }
                 }
@@ -732,7 +734,7 @@ class GaussianTrainer {
                 )
                 params[i] = newParam
                 states[i] = newState
-                Logger.shared.debug("update \(i)th param end")
+                // Logger.shared.debug("update \(i)th param end")
             }
             // Batch eval all updated parameters at once instead of per-parameter
             eval(params)
