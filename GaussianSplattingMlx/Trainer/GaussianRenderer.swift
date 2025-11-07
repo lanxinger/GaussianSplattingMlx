@@ -135,7 +135,7 @@ class GaussianRenderer {
             w: Swift.min(self.W - w, tileSize.w),
             h: Swift.min(self.H - h, tileSize.h)
         )
-        Logger.shared.debug("computeTileMask")
+        // Logger.shared.debug("computeTileMask")
         let in_mask_condition = computeTileMask(
             h: h,
             w: w,
@@ -144,7 +144,7 @@ class GaussianRenderer {
         )
         let in_mask = conditionToIndices(condition: in_mask_condition)
         if in_mask.shape[0] <= skipThreshold {
-            Logger.shared.debug("skip tile")
+            // Logger.shared.debug("skip tile")
             return (
                 self.whiteBackground
                     ? MLXArray.ones([tileSizeRest.h, tileSizeRest.w, 3])
@@ -159,7 +159,7 @@ class GaussianRenderer {
                 .stride(from: w, to: w + tileSizeRest.w)
             ].flattened(start: 0, end: -2)
         )
-        Logger.shared.debug("getSortedValues")
+        // Logger.shared.debug("getSortedValues")
         let sortedValues = getSortedValues(
             means2d: means2d,
             cov2d: cov2d,
@@ -169,20 +169,20 @@ class GaussianRenderer {
             in_mask: in_mask
         )
 
-        Logger.shared.debug("computeGaussianWeights")
+        // Logger.shared.debug("computeGaussianWeights")
         let gauss_weight = computeGaussianWeights(
             tile_coord: tile_coord,
             sorted_means2d: sortedValues.means2d,
             sorted_conic: sortedValues.conic
         )
-        Logger.shared.debug("renderTile alpha")
+        // Logger.shared.debug("renderTile alpha")
         let alpha =
             gauss_weight[.ellipsis, .newAxis]
             * MLX.clip(
                 sortedValues.opacity[.newAxis],
                 max: 0.99
             )
-        Logger.shared.debug("renderTile T")
+        // Logger.shared.debug("renderTile T")
         let beforeT = MLX.concatenated(
             [
                 MLX.ones(like: alpha[0..., .stride(to: 1)]),
@@ -192,16 +192,16 @@ class GaussianRenderer {
         )
         let T = beforeT.cumprod(axis: 1)
 
-        Logger.shared.debug("renderTile acc_alpha")
+        // Logger.shared.debug("renderTile acc_alpha")
         let acc_alpha = (alpha * T).sum(axis: 1)
 
-        Logger.shared.debug("renderTile tile_color")
+        // Logger.shared.debug("renderTile tile_color")
         let tile_color =
             (T * alpha * sortedValues.color[.newAxis]).sum(
                 axis: 1
             ) + (1 - acc_alpha) * (self.whiteBackground ? 1 : 0)
 
-        Logger.shared.debug("renderTile tile_depth")
+        // Logger.shared.debug("renderTile tile_depth")
         let tile_depth =
             ((T * alpha)
             * sortedValues.depths.expandedDimensions(axes: [0, -1])).sum(
@@ -228,9 +228,9 @@ class GaussianRenderer {
         visiility_filter: MLXArray,
         radii: MLXArray
     ) {
-        Logger.shared.debug("get_radius")
+        // Logger.shared.debug("get_radius")
         let radii = get_radius(cov2d: cov2d)
-        Logger.shared.debug("get_rect")
+        // Logger.shared.debug("get_rect")
         let rect = get_rect(
             pix_coord: means2d,
             radii: radii,
@@ -243,7 +243,7 @@ class GaussianRenderer {
         let render_alpha = MLXArray.zeros(self.pix_coord.shape[0..<2] + [1])
         for h in stride(from: 0, to: camera.imageHeight, by: TILE_SIZE.h) {
             for w in stride(from: 0, to: camera.imageWidth, by: TILE_SIZE.w) {
-                Logger.shared.debug("before renderTile")
+                // Logger.shared.debug("before renderTile")
                 let (tile_color, tile_depth, acc_alpha) = renderTile(
                     h: h,
                     w: w,
@@ -255,8 +255,8 @@ class GaussianRenderer {
                     depths: depths,
                     rect: rect
                 )
-                Logger.shared.debug("after renderTile")
-                Logger.shared.debug("before assign")
+                // Logger.shared.debug("after renderTile")
+                // Logger.shared.debug("before assign")
                 render_color[
                     .stride(from: h, to: h + TILE_SIZE.h),
                     .stride(from: w, to: w + TILE_SIZE.w)
@@ -269,7 +269,7 @@ class GaussianRenderer {
                     .stride(from: h, to: h + TILE_SIZE.h),
                     .stride(from: w, to: w + TILE_SIZE.w)
                 ] = acc_alpha
-                Logger.shared.debug("after assign")
+                // Logger.shared.debug("after assign")
             }
         }
 
@@ -290,7 +290,7 @@ class GaussianRenderer {
         visiility_filter: MLXArray,
         radii: MLXArray
     ) {
-        Logger.shared.debug("projection_ndc")
+        // Logger.shared.debug("projection_ndc")
         var (mean_ndc, mean_view, in_mask) = projection_ndc(
             points: means3d,
             viewMatrix: camera.worldViewTransform,
@@ -304,16 +304,16 @@ class GaussianRenderer {
         let opacity = opacity[in_mask]
         let scales = scales[in_mask]
         let rotations = rotations[in_mask]
-        Logger.shared.debug("build_color")
+        // Logger.shared.debug("build_color")
         let color = build_color(
             means3d: means3d,
             shs: shs,
             camera: camera,
             activeShDegree: self.active_sh_degree
         )
-        Logger.shared.debug("build_covariance_3d")
+        // Logger.shared.debug("build_covariance_3d")
         let cov3d = build_covariance_3d(s: scales, r: rotations)
-        Logger.shared.debug("build_covariance_2d")
+        // Logger.shared.debug("build_covariance_2d")
         let cov2d = build_covariance_2d(
             mean3d: means3d,
             cov3d: cov3d,
@@ -328,7 +328,7 @@ class GaussianRenderer {
         let mean_coord_y =
             ((mean_ndc[.ellipsis, 1] + 1) * camera.imageHeight - 1.0) * 0.5
         let means2d = MLX.stacked([mean_coord_x, mean_coord_y], axis: -1)
-        Logger.shared.debug("render")
+        // Logger.shared.debug("render")
         let rets = render(
             camera: camera,
             means2d: means2d,
