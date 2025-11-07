@@ -91,7 +91,12 @@ class GaussianTrainer {
     // SH coefficient optimization (inspired by LichtFeld-Studio 2.4x speedup)
     // Skip higher-degree SH coefficient updates early in training when they have minimal impact
     var shHigherDegreeStartIter: Int = 1000
-    
+
+    // Multi-view consistent densification (inspired by FastGS 100-second training)
+    // Use multi-view consistency for more robust densification decisions
+    var useMultiViewDensification: Bool = true
+    var multiViewSampleCount: Int = 4  // Number of views to sample for consistency check
+
     // Tracking gradients for densification
     var xyzGradAccumulation: MLXArray = MLXArray.zeros([0, 3])
     var denomGradAccumulation: MLXArray = MLXArray.zeros([0])
@@ -148,6 +153,76 @@ class GaussianTrainer {
         xyzGradAccumulation = MLXArray.zeros([numPoints])
         denomGradAccumulation = MLXArray.zeros([numPoints])
     }
+
+    // Multi-view consistent densification score computation (FastGS approach)
+    // Samples multiple views and computes per-Gaussian scores based on gradient consistency
+    func computeMultiViewScores() -> MLXArray {
+        let numPoints = model._xyz.shape[0]
+        var gradientSamples: [MLXArray] = []
+
+        // Sample multiple views and compute gradients for each
+        for _ in 0..<multiViewSampleCount {
+            let (trainCamera, trainRGB, trainMask, trainDepth) = fetchTrainData()
+
+            // Compute loss and gradients for this view
+            let params = model.getParams()
+            let computeLoss: ([MLXArray]) -> MLXArray = { params in
+                let _xyz = params[0]
+                let _features_dc = params[1]
+                let _features_rest = params[2]
+                let _scales = params[3]
+                let _rotation = params[4]
+                let _opacity = params[5]
+
+                let means3d = gaussRender.get_xyz_from(_xyz)
+                let opacity = gaussRender.get_opacity_from(_opacity)
+                let scales = gaussRender.get_scales_from(_scales)
+                let rotations = gaussRender.get_rotation_from(_rotation)
+                let shs = gaussRender.get_features_from(_features_dc, _features_rest)
+
+                let (render, _, _, _, _) = gaussRender.forward(
+                    camera: trainCamera,
+                    means3d: means3d,
+                    shs: shs,
+                    opacity: opacity,
+                    scales: scales,
+                    rotations: rotations
+                )
+
+                // Compute L1 loss
+                let l1_loss = l1Loss(render, trainRGB)
+                return l1_loss
+            }
+
+            // Get gradient for xyz parameter (index 0)
+            let grads = MLX.grad(computeLoss, argumentNumbers: [0])(params)
+            let xyzGrad = grads[0]
+
+            // Compute per-Gaussian gradient magnitude
+            let gradNorm = MLX.sqrt(MLX.sum(MLX.square(xyzGrad), axes: [1]))
+            gradientSamples.append(gradNorm)
+        }
+
+        // Stack gradients: [multiViewSampleCount, numPoints]
+        let stackedGrads = MLX.stacked(gradientSamples, axis: 0)
+
+        // Compute mean gradient magnitude across views
+        let meanGrad = MLX.mean(stackedGrads, axes: [0])  // [numPoints]
+
+        // Compute variance of gradients across views (consistency measure)
+        let variance = MLX.variance(stackedGrads, axes: [0])  // [numPoints]
+
+        // Multi-view score: high mean gradient + low variance = consistent high error
+        // Normalize variance to [0, 1] range and invert (high consistency = low variance)
+        let maxVariance = MLX.max(variance)
+        let consistencyScore = 1.0 - (variance / (maxVariance + 1e-7))
+
+        // Combined score: mean gradient weighted by consistency
+        // Gaussians with consistent high gradients across views get high scores
+        let multiViewScore = meanGrad * consistencyScore
+
+        return multiViewScore
+    }
     
     func split_and_prune(params: [MLXArray], states: [TupleState], iteration: Int) {
         guard iteration >= densifyFromIter && iteration <= densifyUntilIter else {
@@ -163,16 +238,33 @@ class GaussianTrainer {
 
         let numPoints = _xyz.shape[0]
 
-        // Calculate average gradient magnitude
-        let avgGrads = xyzGradAccumulation / denomGradAccumulation.expandedDimensions(axes: [1])
-        let gradMagnitude = MLX.sqrt(avgGrads)
+        // Compute densification scores: either multi-view or gradient-based
+        let densificationScore: MLXArray
+        if useMultiViewDensification {
+            // FastGS approach: Multi-view consistent densification
+            Logger.shared.debug("Computing multi-view scores for densification")
+            densificationScore = computeMultiViewScores()
+            Logger.shared.debug("Multi-view scores computed")
+        } else {
+            // Original approach: Gradient-based densification
+            let avgGrads = xyzGradAccumulation / denomGradAccumulation.expandedDimensions(axes: [1])
+            densificationScore = MLX.sqrt(avgGrads)
+        }
 
         // Get current scales and opacity
         let scales = MLX.exp(_scales)
         let opacity = MLX.sigmoid(_opacity)
 
-        // Find points to densify (high gradient)
-        let gradMask = gradMagnitude .> gradientThreshold
+        // Find points to densify (high score)
+        // For multi-view scores, use percentile-based threshold instead of fixed threshold
+        let densifyThreshold: MLXArray
+        if useMultiViewDensification {
+            // Use 80th percentile as threshold for multi-view scores
+            densifyThreshold = MLX.percentile(densificationScore, q: 80)
+        } else {
+            densifyThreshold = MLXArray(gradientThreshold)
+        }
+        let gradMask = densificationScore .> densifyThreshold
 
         // Find points to split (large scale)
         let maxScalePerGaussian = MLX.max(scales, axes: [1])
