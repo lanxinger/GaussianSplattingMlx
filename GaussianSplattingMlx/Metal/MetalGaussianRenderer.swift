@@ -123,7 +123,28 @@ class MetalGaussianRenderer {
         renderPipelineDescriptor.vertexFunction = library.makeFunction(name: "vertexShader")
         renderPipelineDescriptor.fragmentFunction = library.makeFunction(name: "fragmentShader")
         renderPipelineDescriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
-        
+
+        // CRITICAL FIX: Add vertex descriptor for shader attributes
+        // The vertexShader expects attribute(0) for position and attribute(1) for texCoord
+        let vertexDescriptor = MTLVertexDescriptor()
+
+        // Attribute 0: position (float2)
+        vertexDescriptor.attributes[0].format = .float2
+        vertexDescriptor.attributes[0].offset = 0
+        vertexDescriptor.attributes[0].bufferIndex = 0
+
+        // Attribute 1: texCoord (float2)
+        vertexDescriptor.attributes[1].format = .float2
+        vertexDescriptor.attributes[1].offset = MemoryLayout<SIMD2<Float>>.stride  // 8 bytes
+        vertexDescriptor.attributes[1].bufferIndex = 0
+
+        // Layout for buffer 0 (interleaved position + texCoord)
+        vertexDescriptor.layouts[0].stride = MemoryLayout<SIMD2<Float>>.stride * 2  // 16 bytes per vertex
+        vertexDescriptor.layouts[0].stepRate = 1
+        vertexDescriptor.layouts[0].stepFunction = .perVertex
+
+        renderPipelineDescriptor.vertexDescriptor = vertexDescriptor
+
         do {
             self.renderPipelineState = try device.makeRenderPipelineState(descriptor: renderPipelineDescriptor)
         } catch {
