@@ -46,7 +46,7 @@ func distTopKApprox(_ X: MLXArray, k: Int, voxelSize: Float? = nil) -> MLXArray 
                     voxelCoords[.ellipsis, 2] * (gridSize * gridSize)
 
     // For each point, find k nearest neighbors in nearby voxels
-    var avgDist = MLXArray.zeros([N])
+    let avgDist = MLXArray.zeros([N])
 
     // Process in chunks to manage memory
     let chunkSize = 256
@@ -56,7 +56,7 @@ func distTopKApprox(_ X: MLXArray, k: Int, voxelSize: Float? = nil) -> MLXArray 
         let batchSize = endIdx - startIdx
 
         let batchPoints = X[batchIndices]  // [batch, 3]
-        let batchHashes = voxelHash[batchIndices]  // [batch]
+        let _ = voxelHash[batchIndices]  // [batch]
         let batchVoxels = voxelCoords[batchIndices]  // [batch, 3]
 
         // For each point in batch, collect candidate neighbors from 27 nearby voxels

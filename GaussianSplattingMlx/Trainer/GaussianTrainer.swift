@@ -264,7 +264,7 @@ class GaussianTrainer {
 
             // Create scaled camera with adjusted intrinsics
             let originalIntrinsic = data.intrinsicArray[ind]
-            var scaledIntrinsic = originalIntrinsic * Float(scale)
+            let scaledIntrinsic = originalIntrinsic * Float(scale)
 
             // Last row/column should remain [0, 0, 1]
             scaledIntrinsic[2, 0] = originalIntrinsic[2, 0]
@@ -297,7 +297,6 @@ class GaussianTrainer {
     // Multi-view consistent densification score computation (FastGS approach)
     // Samples multiple views and computes per-Gaussian scores based on gradient consistency
     func computeMultiViewScores(iteration: Int) -> MLXArray {
-        let numPoints = model._xyz.shape[0]
         var gradientSamples: [MLXArray] = []
 
         // Compute resolution scale for this iteration
@@ -306,7 +305,7 @@ class GaussianTrainer {
         // Sample multiple views and compute gradients for each
         // Use current resolution scale for consistency with main training loop
         for _ in 0..<multiViewSampleCount {
-            let (trainCamera, trainRGB, trainMask, trainDepth) = fetchTrainDataWithResolution(scale: resolutionScale)
+            let (trainCamera, trainRGB, _, _) = fetchTrainDataWithResolution(scale: resolutionScale)
 
             // Compute loss and gradients for this view
             let params = model.getParams()
@@ -379,8 +378,6 @@ class GaussianTrainer {
         var _scales = params[3]
         var _rotation = params[4]
         var _opacity = params[5]
-
-        let numPoints = _xyz.shape[0]
 
         // Compute densification scores: either multi-view or gradient-based
         let densificationScore: MLXArray

@@ -146,8 +146,8 @@ class RenderViewModel: ObservableObject {
         setInitialCamera(boundingBox: calcBoundingBox(xyzArray: _xyz), width: width, height: height)
     }
     func render() {
-        guard let xyzArray, let opacityArray, let scalesArray,
-            let rotationArray, let features_dcArray, let features_restArray
+        guard let _ = xyzArray, let _ = opacityArray, let _ = scalesArray,
+            let _ = rotationArray, let _ = features_dcArray, let _ = features_restArray
         else {
             return
         }
@@ -348,7 +348,7 @@ struct RenderView: View {
                     }
                 }
         )
-        .onChange(of: url) { newURL in
+        .onChange(of: url) { _, newURL in
             if let url = newURL {
                 renderQueue.async {
                     do {
@@ -365,7 +365,7 @@ struct RenderView: View {
                 }
             }
         }
-        .onChange(of: viewModel.useMetalRenderer) { _ in
+        .onChange(of: viewModel.useMetalRenderer) { _, _ in
             if url != nil && viewModel.xyzArray != nil {
                 renderQueue.async {
                     viewModel.render()
